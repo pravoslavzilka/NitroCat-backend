@@ -31,7 +31,7 @@ RUN pip install \
 # CLIPZyme
 RUN pip install clipzyme==0.0.12
 
-# Reaction mapping
+RUN pip install biopython==1.86
 RUN pip install rxnmapper==0.4.3
 
 # Chemistry
