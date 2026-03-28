@@ -105,6 +105,7 @@ RUN pip install \
     urllib3==2.6.3 \
     uvicorn==0.42.0 \
     wandb==0.25.1 \
+    wget==3.2 \
     wcwidth==0.6.0 \
     xxhash==3.6.0 \
     yarl==1.23.0 \
