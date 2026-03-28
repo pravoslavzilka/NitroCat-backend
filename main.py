@@ -3,6 +3,32 @@ import requests
 from tqdm import tqdm
 import zipfile
 
+import os
+import sys
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+logger.info("=== Starting up ===")
+logger.info(f"Python: {sys.version}")
+logger.info(f"Files present: {os.listdir('files') if os.path.exists('files') else 'files/ missing'}")
+
+# Download files if missing
+logger.info("Checking model files...")
+# ... your download code ...
+
+logger.info("Loading screening set...")
+# ... your pickle.load ...
+
+logger.info("Loading CLIPZyme model...")
+# ... your CLIPZyme load ...
+
+logger.info("=== Ready ===")
+
+
+
+
 FILES = {
     "files/clipzyme_model.ckpt": "https://zenodo.org/records/15161343/files/clipzyme_model.zip?download=1",
     "files/clipzyme_screening_set.p": "https://zenodo.org/records/15161343/files/clipzyme_data.zip?download=1",
