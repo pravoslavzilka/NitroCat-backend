@@ -31,49 +31,126 @@ def _canonical(smiles: str) -> str:
              for p in smiles.split(".") if Chem.MolFromSmiles(p.strip())]
     return ".".join(sorted(parts))
 
+def _atom_counts(smi: str) -> Counter:
+    """Count heavy atoms only — RDKit handles H implicitly so we skip it."""
+    total = Counter()
+    for part in smi.split("."):
+        mol = Chem.MolFromSmiles(part.strip())
+        if mol:
+            for a in mol.GetAtoms():
+                if a.GetSymbol() != "H":   # ignore implicit/explicit H
+                    total[a.GetSymbol()] += 1
+    return total
+
 def _balance(substrate: str, product: str):
+    """
+    Two-sided balancing using heavy atoms only (H is implicit in RDKit).
+
+    Pass 1 — add co-reactants to substrate:
+        atoms in product but not substrate (e.g. hydroxylation needs O)
+    Pass 2 — add byproducts to product:
+        atoms in substrate but not product (e.g. elimination loses Br)
+    """
     comments = []
 
-    def counts(smi):
-        total = Counter()
-        for p in smi.split("."):
-            mol = Chem.MolFromSmiles(p.strip())
-            if mol:
-                for a in mol.GetAtoms():
-                    total[a.GetSymbol()] += 1
-        return total
+    s_counts = _atom_counts(substrate)
+    p_counts = _atom_counts(product)
 
-    missing = {el: n - counts(substrate).get(el, 0)
-               for el, n in counts(product).items()
-               if n > counts(substrate).get(el, 0)}
+    # ── Pass 1: co-reactants ──────────────────────────────────────────────────
+    # heavy-atom counts for each co-reactant (H not counted)
+    co_reactants = [
+        ("O",    {"O": 1}, "water"),
+        ("O=O",  {"O": 2}, "molecular oxygen"),
+        ("C",    {"C": 1}, "methyl donor (SAM placeholder)"),
+        ("CC",   {"C": 2}, "ethyl donor"),
+        ("CCC",  {"C": 3}, "propyl donor"),
+    ]
 
-    if not missing:
-        return f"{substrate}>>{product}", comments
+    missing = {
+        el: p_counts[el] - s_counts.get(el, 0)
+        for el in p_counts if p_counts[el] > s_counts.get(el, 0)
+    }
 
-    co_reactants = [("O", "water"), ("O=O", "molecular oxygen"), ("[H][H]", "hydrogen")]
-    added, remaining = [], missing.copy()
+    added_reactants, remaining = [], missing.copy()
 
-    for smi, name in co_reactants:
+    for smi, co_counts, name in co_reactants:
         if not remaining:
             break
-        mol = Chem.MolFromSmiles(smi)
-        co  = Counter(a.GetSymbol() for a in mol.GetAtoms())
-        while remaining and any(co.get(el, 0) >= remaining.get(el, 0) for el in remaining):
-            added.append(smi)
+        while remaining and all(
+            co_counts.get(el, 0) >= remaining.get(el, 0)
+            for el in remaining if el in co_counts
+        ) and any(el in remaining for el in co_counts):
+            added_reactants.append(smi)
             for el in list(remaining):
-                remaining[el] -= co.get(el, 0)
+                remaining[el] -= co_counts.get(el, 0)
                 if remaining[el] <= 0:
                     del remaining[el]
 
     if remaining:
-        added.append("O")
-        comments.append(f"Could not fully balance {list(remaining.keys())} — water added as fallback.")
+        # Don't add fallback water — just warn and proceed with unbalanced reaction
+        comments.append(
+            f"Could not balance missing atoms {list(remaining.keys())} "
+            f"— may need cofactor (e.g. SAM, NADPH, coenzyme A). Proceeding as-is."
+        )
 
-    if added:
-        names = list(dict.fromkeys(n for s, n in co_reactants if s in added))
+    if added_reactants:
+        names = list(dict.fromkeys(n for s, c, n in co_reactants if s in added_reactants))
         comments.append(f"Auto-added co-reactant(s): {', '.join(names)}.")
 
-    return f"{substrate + '.' + '.'.join(added)}>>{product}", comments
+    full_substrate = substrate + ("." + ".".join(added_reactants) if added_reactants else "")
+    s_counts_new   = _atom_counts(full_substrate)
+
+    # ── Pass 2: byproducts ────────────────────────────────────────────────────
+    # heavy-atom definitions only — H is omitted since it is never counted
+    # CO2 MUST come before water so decarboxylation doesn't consume O prematurely
+    byproducts = [
+        ("O=C=O", {"C":  1, "O": 2}, "CO2"),
+        ("Br",    {"Br": 1},         "HBr"),
+        ("Cl",    {"Cl": 1},         "HCl"),
+        ("F",     {"F":  1},         "HF"),
+        ("N",     {"N":  1},         "ammonia"),
+        ("S",     {"S":  1},         "H2S"),
+        ("O",     {"O":  1},         "water"),
+    ]
+
+    excess = {
+        el: s_counts_new[el] - p_counts.get(el, 0)
+        for el in s_counts_new if s_counts_new[el] > p_counts.get(el, 0)
+    }
+
+    added_products, excess_remaining = [], excess.copy()
+
+    for smi, bp_counts, name in byproducts:
+        if not excess_remaining:
+            break
+        # ALL heavy atoms of byproduct must be present in excess
+        while excess_remaining and all(
+            el in excess_remaining and excess_remaining[el] >= n
+            for el, n in bp_counts.items()
+        ):
+            added_products.append(smi)
+            for el, n in bp_counts.items():
+                excess_remaining[el] -= n
+                if excess_remaining[el] <= 0:
+                    del excess_remaining[el]
+
+    if excess_remaining:
+        # Don't add random water — just warn and proceed as-is
+        comments.append(
+            f"Could not balance excess heavy atoms {dict(excess_remaining)} "
+            f"— may involve uncommon cofactors (SAM, NADPH, CoA). Proceeding as-is."
+        )
+
+    if added_products:
+        bp_names = []
+        for smi, _, name in byproducts:
+            if smi in added_products and name not in bp_names:
+                bp_names.append(name)
+        comments.append(f"Auto-added byproduct(s): {', '.join(bp_names)}.")
+
+    full_product = product + ("." + ".".join(added_products) if added_products else "")
+    return f"{full_substrate}>>{full_product}", comments
+
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -169,21 +246,14 @@ def print_result(output: dict):
 # ── Run ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    cases = [
+        # (label, substrate, product)
+        ("Elimination — HBr leaves",
+            "O=C(CCCl)c1cccs1",     "O=C(C=C)c1cccs1"),
 
-    # 7. Invalid SMILES — gibberish
-    print_result(query_enzymes("not_a_molecule", "CC=O"))
+    ]
 
-    # 8. Invalid SMILES — broken ring closure
-    print_result(query_enzymes("C1CC", "CCC"))
-
-    # 9. Empty substrate
-    print_result(query_enzymes("", "CC=O"))
-
-    # 10. Substrate equals product
-    print_result(query_enzymes("CC(O)C", "CC(O)C"))
-
-    # 11. Double dot in SMILES
-    print_result(query_enzymes("CC(O)C..O", "CC(=O)C"))
-
-    # 12. Valid SMILES but no chemical change possible to map
-    print_result(query_enzymes("C", "C"))
+    for label, sub, prod in cases:
+        print(f"\n=== {label} ===")
+        print(f"  {sub} >> {prod}")
+        print_result(query_enzymes(sub, prod))
