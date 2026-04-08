@@ -1,4 +1,3 @@
-
 import time
 import hashlib
 import os
@@ -69,7 +68,6 @@ def _parse_uniprot(uniprot_id: str, data: dict) -> dict:
         except (KeyError, IndexError):
             pass
     if not ec:
-        # Some entries have EC in the protein name text (e.g. "EC 1.14.13.x")
         try:
             name = result.get("protein_name", "") or ""
             import re
@@ -80,9 +78,8 @@ def _parse_uniprot(uniprot_id: str, data: dict) -> dict:
             pass
     result["ec_number"] = ec
 
-
-    result["kcat"]    = None
-    result["km"]      = None
+    result["kcat"] = None
+    result["km"]   = None
 
     for comment in data.get("comments", []):
         ctype = comment.get("commentType", "")
@@ -91,8 +88,8 @@ def _parse_uniprot(uniprot_id: str, data: dict) -> dict:
             kms, kcats = [], []
             for item in comment.get("michaelisConstants", []):
                 kms.append({
-                    "value":    item.get("constant"),
-                    "unit":     item.get("unit"),
+                    "value":     item.get("constant"),
+                    "unit":      item.get("unit"),
                     "substrate": item.get("substrate"),
                 })
             for item in comment.get("maximumVelocities", []):
@@ -170,8 +167,6 @@ def _parse_uniprot(uniprot_id: str, data: dict) -> dict:
                 except (KeyError, IndexError):
                     pass
 
-    
-
     # Links
     result["alphafold_url"] = f"https://alphafold.ebi.ac.uk/entry/{uniprot_id}"
     result["uniprot_url"]   = f"https://www.uniprot.org/uniprotkb/{uniprot_id}"
@@ -179,7 +174,39 @@ def _parse_uniprot(uniprot_id: str, data: dict) -> dict:
     return result
 
 
-# ── BRENDA ────────────────────────────────────────────────────────────────────
+# ── BRENDA JSON ───────────────────────────────────────────────────────────────
+
+def _fetch_brenda_json(ec: str, uniprot_id: str) -> dict:
+    """
+    Fetch enzyme properties from the local BRENDA JSON file via brenda.py.
+    Returns a dict with km_q1_mM, kcat_q1_per_s, temperature_median, ph_median.
+    Falls back gracefully if brenda.py or the JSON file is unavailable.
+    """
+    if not ec:
+        return {"brenda_json_note": "No EC number — cannot query BRENDA JSON"}
+
+    try:
+        from brenda import get_enzyme_properties
+    except ImportError:
+        return {"brenda_json_note": "brenda.py not found — place it in the same directory"}
+
+    try:
+        props = get_enzyme_properties(ec, uniprot_id)
+        return {
+            "brenda_km_q1_mM":           props.get("km_q1_mM"),
+            "brenda_kcat_q1_per_s":      props.get("kcat_q1_per_s"),
+            "brenda_temperature_median": props.get("temperature_median"),
+            "brenda_ph_median":          props.get("ph_median"),
+            "brenda_enzyme_name":        props.get("enzyme_name"),
+        }
+    except ValueError as e:
+        # Protein not found in BRENDA JSON — not an error, just missing data
+        return {"brenda_json_note": str(e)}
+    except Exception as e:
+        return {"brenda_json_note": f"BRENDA JSON query failed: {e}"}
+
+
+# ── BRENDA SOAP (legacy) ──────────────────────────────────────────────────────
 
 def _fetch_brenda(ec_number: str) -> dict:
     if not BRENDA_EMAIL or not BRENDA_PASSWORD:
@@ -195,7 +222,6 @@ def _fetch_brenda(ec_number: str) -> dict:
         pw_hash = hashlib.sha256(BRENDA_PASSWORD.encode()).hexdigest()
         client  = Client("https://www.brenda-enzymes.org/soap/brenda_zeep.wsdl")
 
-        # BRENDA takes ONE string: "email,hash,ecNumber*X.X.X.X#"
         params = f"{BRENDA_EMAIL},{pw_hash},ecNumber*{ec_number}#"
 
         result = {}
@@ -207,7 +233,7 @@ def _fetch_brenda(ec_number: str) -> dict:
                  "substrate": r.get("substrate"), "organism": r.get("organism")}
                 for r in (rows or []) if r.get("turnoverNumber")
             ][:5]
-        except Exception as e:
+        except Exception:
             result["kcat"] = None
 
         try:
@@ -217,7 +243,7 @@ def _fetch_brenda(ec_number: str) -> dict:
                  "substrate": r.get("substrate"), "organism": r.get("organism")}
                 for r in (rows or []) if r.get("kmValue")
             ][:5]
-        except Exception as e:
+        except Exception:
             result["km"] = None
 
         try:
@@ -227,7 +253,7 @@ def _fetch_brenda(ec_number: str) -> dict:
                  "substrate": r.get("substrate"), "organism": r.get("organism")}
                 for r in (rows or []) if r.get("kcatKmValue")
             ][:5]
-        except Exception as e:
+        except Exception:
             result["kcat_km"] = None
 
         try:
@@ -236,7 +262,7 @@ def _fetch_brenda(ec_number: str) -> dict:
                 {"value": r.get("phOptimum"), "organism": r.get("organism")}
                 for r in (rows or []) if r.get("phOptimum")
             ][:3]
-        except Exception as e:
+        except Exception:
             result["ph_optimum"] = None
 
         try:
@@ -246,14 +272,13 @@ def _fetch_brenda(ec_number: str) -> dict:
                  "organism": r.get("organism")}
                 for r in (rows or []) if r.get("temperatureOptimum")
             ][:3]
-        except Exception as e:
+        except Exception:
             result["temp_optimum"] = None
 
         return result
 
     except Exception as e:
         return {"brenda_note": f"BRENDA query failed: {e}"}
-
 
 
 # ── Single enzyme enrichment ──────────────────────────────────────────────────
@@ -269,11 +294,25 @@ def _enrich_single(enzyme: dict) -> dict:
     if not result.get("km"):
         time.sleep(1.0)
         sabio = _fetch_sabiork(uniprot_id)
-        # Only update fields that are still missing
         for key in ("kcat", "km", "ph_optimum", "temp_optimum", "sabio_entries"):
             if not result.get(key) and sabio.get(key):
                 result[key] = sabio[key]
-    
+
+    # BRENDA JSON — fill in missing km/kcat/temp/pH using local flat file
+    ec = result.get("ec_number")
+    brenda_data = _fetch_brenda_json(ec, uniprot_id)
+    result.update(brenda_data)
+
+    # Back-fill km and kcat from BRENDA JSON if still missing
+    if not result.get("km") and result.get("brenda_km_q1_mM") is not None:
+        result["km"] = [{"value": result["brenda_km_q1_mM"], "unit": "mM", "source": "BRENDA_Q1"}]
+    if not result.get("kcat") and result.get("brenda_kcat_q1_per_s") is not None:
+        result["kcat"] = [{"value": result["brenda_kcat_q1_per_s"], "unit": "1/s", "source": "BRENDA_Q1"}]
+    if not result.get("optimal_temp") and result.get("brenda_temperature_median") is not None:
+        result["optimal_temp"] = result["brenda_temperature_median"]
+    if not result.get("optimal_ph") and result.get("brenda_ph_median") is not None:
+        result["optimal_ph"] = result["brenda_ph_median"]
+
     return result
 
 
@@ -285,17 +324,30 @@ def enrich_results(query_output: dict, workers: int = 10) -> dict:
 
     enriched = []
     for enzyme in query_output["result"]:
-        # UniProt in parallel is fine — big infrastructure
-        # SABIO-RK must be sequential — small academic server
         result = {**enzyme}
 
-        # UniProt — fast, parallel safe
-        raw  = _fetch_uniprot(enzyme["uniprot"])
+        # UniProt
+        raw = _fetch_uniprot(enzyme["uniprot"])
         result.update(_parse_uniprot(enzyme["uniprot"], raw))
 
-        # SABIO-RK 
+        # SABIO-RK
         sabio = _fetch_sabiork(enzyme["uniprot"])
         result.update(sabio)
+
+        # BRENDA JSON — always run, fills missing fields
+        ec = result.get("ec_number")
+        brenda_data = _fetch_brenda_json(ec, enzyme["uniprot"])
+        result.update(brenda_data)
+
+        # Back-fill from BRENDA JSON where other sources returned nothing
+        if not result.get("km") and result.get("brenda_km_q1_mM") is not None:
+            result["km"] = [{"value": result["brenda_km_q1_mM"], "unit": "mM", "source": "BRENDA_Q1"}]
+        if not result.get("kcat") and result.get("brenda_kcat_q1_per_s") is not None:
+            result["kcat"] = [{"value": result["brenda_kcat_q1_per_s"], "unit": "1/s", "source": "BRENDA_Q1"}]
+        if not result.get("optimal_temp") and result.get("brenda_temperature_median") is not None:
+            result["optimal_temp"] = result["brenda_temperature_median"]
+        if not result.get("optimal_ph") and result.get("brenda_ph_median") is not None:
+            result["optimal_ph"] = result["brenda_ph_median"]
 
         enriched.append(result)
 
@@ -307,9 +359,8 @@ def enrich_results(query_output: dict, workers: int = 10) -> dict:
 
 
 def _fetch_sabiork(uniprot_id: str) -> dict:
-    """Fetch kinetic parameters from SABIO-RK. Returns kcat, km, ph_optimum, temp_optimum."""
+    """Fetch kinetic parameters from SABIO-RK."""
 
-    # Step 1: get entry IDs
     try:
         id_resp = requests.get(
             "https://sabiork.h-its.org/sabioRestWebServices/searchKineticLaws/entryIDs",
@@ -318,7 +369,6 @@ def _fetch_sabiork(uniprot_id: str) -> dict:
         )
         text = id_resp.text.strip()
 
-        # Handle "no data found" — not an error, just not in SABIO-RK
         if id_resp.status_code != 200 or not text or "no data found" in text.lower():
             return {
                 "kcat": None, "km": None,
@@ -331,16 +381,10 @@ def _fetch_sabiork(uniprot_id: str) -> dict:
     except Exception as e:
         return {"sabio_note": f"SABIO-RK lookup failed: {e}"}
 
-
-    # Step 2: fetch SBML — retry up to 3 times with backoff
-    sbml_resp = requests.get(
-    "https://sabiork.h-its.org/sabioRestWebServices/kineticLaws",
-    params={"kinlawids": ",".join(entry_ids[:10])},
-    timeout=(5, 30),  # 5s connect, 30s read
-    )
+    sbml_resp = None
     for attempt in range(3):
         try:
-            time.sleep(0.5 * (attempt + 1))  # 0.5s, 1s, 1.5s
+            time.sleep(0.5 * (attempt + 1))
             sbml_resp = requests.get(
                 "https://sabiork.h-its.org/sabioRestWebServices/kineticLaws",
                 params={"kinlawids": ",".join(entry_ids[:10])},
@@ -355,9 +399,6 @@ def _fetch_sabiork(uniprot_id: str) -> dict:
     if not sbml_resp or sbml_resp.status_code != 200:
         return {"sabio_note": f"SABIO-RK SBML fetch failed (status {sbml_resp.status_code if sbml_resp else 'no response'})"}
 
-
-    # Step 3: parse SBML XML
-    # Register the sbrk namespace
     ET.register_namespace("sbrk", "http://sabiork.h-its.org")
     ns = {
         "sbml": "http://www.sbml.org/sbml/level3/version1/core",
@@ -373,31 +414,24 @@ def _fetch_sabiork(uniprot_id: str) -> dict:
     kms, kcats, phs, temps = [], [], [], []
 
     for rxn in model.findall(".//sbml:reaction", ns):
-
-        # Km and kcat from localParameter
         kl = rxn.find("sbml:kineticLaw", ns)
         if kl is not None:
             for param in kl.findall(".//sbml:localParameter", ns):
                 pid  = param.get("id", "").lower()
                 val  = param.get("value")
                 unit = param.get("units", "")
-
-                # Fix SABIO unit names
                 unit = unit.replace("swedgeone", "s⁻¹").replace("M", "M")
-
                 if val is None:
                     continue
                 try:
                     val = float(val)
                 except ValueError:
                     continue
-
                 if "km" in pid:
                     kms.append({"value": val, "unit": unit})
                 elif "kcat" in pid:
                     kcats.append({"value": val, "unit": unit})
 
-        # pH and temperature from sbrk namespace
         temp_el = rxn.find(".//sbrk:startValueTemperature", ns)
         ph_el   = rxn.find(".//sbrk:startValuepH", ns)
 
@@ -406,7 +440,6 @@ def _fetch_sabiork(uniprot_id: str) -> dict:
                 temps.append(float(temp_el.text))
             except ValueError:
                 pass
-
         if ph_el is not None and ph_el.text:
             try:
                 phs.append(float(ph_el.text))
@@ -414,13 +447,26 @@ def _fetch_sabiork(uniprot_id: str) -> dict:
                 pass
 
     return {
-        "kcat":         kcats          if kcats  else None,
-        "km":           kms            if kms    else None,
-        "ph_optimum":   list(set(phs)) if phs    else None,
-        "temp_optimum": list(set(temps)) if temps else None,
+        "kcat":          kcats            if kcats  else None,
+        "km":            kms              if kms    else None,
+        "ph_optimum":    list(set(phs))   if phs    else None,
+        "temp_optimum":  list(set(temps)) if temps  else None,
         "sabio_entries": len(entry_ids),
     }
 
 
 if __name__ == "__main__":
-    print(json.dumps(_fetch_sabiork("Q8KLT9"), indent=2))
+    query_output = {
+    "status": "success",
+    "result": [
+        {"uniprot": "P00326"},
+        {"uniprot": "P07327"},
+        {"uniprot": "Q8KLT9"},
+        ],
+        "comments": []
+    }
+
+    enriched = enrich_results(query_output)
+
+    for enzyme in enriched["result"]:
+        print(enzyme)

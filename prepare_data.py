@@ -1,67 +1,67 @@
-"""
-prepare_training_data.py
-========================
-Converts cyp_clipzyme_minimal.csv to CLIPZyme training format.
+import json
+import pickle
+import ast
+import requests
+import time
+from collections import defaultdict
 
-Input columns:  reaction, sequence, protein_id
-Output columns: enzyme_id, smiles, split
+# Get all unique UniProt IDs from your training data
+data = json.load(open('files/my_data.json'))
 
-Usage:
-    python prepare_training_data.py
-    python prepare_training_data.py --input my_file.csv --output files/my_data.csv
-"""
+uniprot_ids = set()
+for record in data:
+    refs = record.get('protein_refs', '[]')
+    uids = ast.literal_eval(refs) if isinstance(refs, str) else refs
+    uniprot_ids.update(uids)
 
-import os
-import argparse
-import pandas as pd
+print(f"Unique UniProt IDs: {len(uniprot_ids)}")
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input",  "-i", default="files/cyp_clipzyme_minimal.csv")
-    parser.add_argument("--output", "-o", default="files/my_data.csv")
-    parser.add_argument("--train",  type=float, default=0.80)
-    parser.add_argument("--val",    type=float, default=0.10)
-    # test = remainder
-    args = parser.parse_args()
+# Fetch EC numbers from UniProt REST API
+def get_ec(uniprot_id):
+    try:
+        url = f"https://rest.uniprot.org/uniprotkb/{uniprot_id}.json"
+        resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        ecs = []
+        for db in data.get('dbReferences', []):
+            if db.get('type') == 'EC':
+                ecs.append(db.get('id', ''))
+        # Also check proteinDescription
+        for rec in data.get('proteinDescription', {}).get('recommendedName', {}).get('ecNumbers', []):
+            ecs.append(rec.get('value', ''))
+        return list(set(filter(None, ecs)))
+    except:
+        return []
 
-    # ── Load ──────────────────────────────────────────────────────────────────
-    print(f"Loading {args.input}...")
-    df = pd.read_csv(args.input)
-    print(f"  {len(df):,} rows  |  {df['protein_id'].nunique()} unique enzymes")
+# Fetch EC for all your enzymes
+uid2ec = {}
+for i, uid in enumerate(uniprot_ids):
+    ecs = get_ec(uid)
+    uid2ec[uid] = ecs
+    if i % 50 == 0:
+        print(f"  {i}/{len(uniprot_ids)} — {uid}: {ecs}")
+    time.sleep(0.1)  # rate limit
 
-    # ── Convert columns ───────────────────────────────────────────────────────
-    df = df.rename(columns={
-        "reaction":   "smiles",
-        "protein_id": "enzyme_id",
-    })[["enzyme_id", "smiles"]]   # drop sequence — CLIPZyme uses CIF structures
+print(f"\nFetched EC numbers for {sum(1 for v in uid2ec.values() if v)} enzymes")
 
-    # ── Clean ─────────────────────────────────────────────────────────────────
-    before = len(df)
-    df = df.dropna().drop_duplicates(subset=["enzyme_id", "smiles"])
-    if len(df) < before:
-        print(f"  Removed {before - len(df)} null/duplicate rows")
+# Build ec2uniprot mapping
+cyp_ec2uniprot = defaultdict(set)
+for uid, ecs in uid2ec.items():
+    for ec in ecs:
+        cyp_ec2uniprot[ec].add(uid)
 
-    # ── Split 80/10/10 ────────────────────────────────────────────────────────
-    df = df.sample(frac=1, random_state=42).reset_index(drop=True)
-    n  = len(df)
-    t  = int(n * args.train)
-    v  = int(n * (args.train + args.val))
+print(f"Unique EC numbers found: {len(cyp_ec2uniprot)}")
 
-    df["split"] = "train"
-    df.loc[t:v, "split"] = "val"
-    df.loc[v:,  "split"] = "test"
+# Merge with existing ec2uniprot.p
+ec2uniprot = pickle.load(open('files/ec2uniprot.p', 'rb'))
 
-    counts = df["split"].value_counts()
-    print(f"  train: {counts.get('train', 0):,}")
-    print(f"  val:   {counts.get('val',   0):,}")
-    print(f"  test:  {counts.get('test',  0):,}")
+for ec, uids in cyp_ec2uniprot.items():
+    if ec in ec2uniprot:
+        ec2uniprot[ec] = list(set(ec2uniprot[ec]) | uids)
+    else:
+        ec2uniprot[ec] = list(uids)
 
-    # ── Save ──────────────────────────────────────────────────────────────────
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
-    df.to_csv(args.output, index=False)
-    print(f"\nSaved → {args.output}")
-    print("\nFirst 3 rows:")
-    print(df.head(3).to_string(index=False))
-
-if __name__ == "__main__":
-    main()
+pickle.dump(ec2uniprot, open('files/ec2uniprot.p', 'wb'))
+print(f"Saved → files/ec2uniprot.p ({len(ec2uniprot)} total EC numbers)")

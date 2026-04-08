@@ -73,7 +73,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from query import query_enzymes
-from uniprot import enrich_results
+from enrich import enrich_results
 
 # ── App ───────────────────────────────────────────────────────────────────────
 

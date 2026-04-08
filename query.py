@@ -249,7 +249,7 @@ if __name__ == "__main__":
     cases = [
         # (label, substrate, product)
         ("Elimination — HBr leaves",
-            "O=C(CCCl)c1cccs1",     "O=C(C=C)c1cccs1"),
+            "CC1=C2CC[C@@]3(C)CC/C=C(/C)[C@H]3C[C@@H]2CC1(C)C",     "OC1(C)CC[C@@]2(C)[C@@H]3CC=C(C)C[C@H]3CC[C@@]2(C)C1"),
 
     ]
 
