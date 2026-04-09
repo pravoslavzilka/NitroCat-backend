@@ -3,10 +3,7 @@ from uniprot import _fetch_uniprot, _parse_uniprot, _fetch_sabiork, _fetch_brend
 import re
 
 def _extract_float(value) -> float | None:
-    """
-    Extract first number from a value that may be a float, int, or string
-    like 'Optimum pH is 8.' or '37 degrees' or '6.5 - 7.5'.
-    """
+   
     if value is None:
         return None
     if isinstance(value, (int, float)):
