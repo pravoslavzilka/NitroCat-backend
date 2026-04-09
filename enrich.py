@@ -17,6 +17,7 @@ def _extract_float(value) -> float | None:
 
 
 def _unify_enzyme(raw_result: dict) -> dict:
+
     temp = (
         raw_result.get("brenda_temperature_median")
         or raw_result.get("temp_optimum")
@@ -59,14 +60,11 @@ def _unify_enzyme(raw_result: dict) -> dict:
         "ph":              _extract_float(ph),
         "km_mM":           _extract_float(km),
         "kcat_per_s":      _extract_float(kcat),
+        "cofactors":       raw_result.get("cofactors", []),
     }
 
 
 def _compute_group_stats(enzymes: list[dict]) -> dict:
-    """
-    Compute group-level statistics across all enzymes.
-    Returns median temperature, median pH, Q1 of KM and Kcat.
-    """
     def collect(field):
         return [e[field] for e in enzymes if e.get(field) is not None]
 
@@ -74,6 +72,14 @@ def _compute_group_stats(enzymes: list[dict]) -> dict:
     phs    = collect("ph")
     kms    = collect("km_mM")
     kcats  = collect("kcat_per_s")
+
+    # Collect all cofactors across all enzymes with counts
+    from collections import Counter
+    cofactor_counts = Counter(
+        cofactor
+        for e in enzymes
+        for cofactor in e.get("cofactors", [])
+    )
 
     def stats(values: list) -> dict | None:
         if not values:
@@ -94,6 +100,10 @@ def _compute_group_stats(enzymes: list[dict]) -> dict:
         "ph":          stats(phs),
         "km_mM":       stats(kms),
         "kcat_per_s":  stats(kcats),
+        "cofactors":   [
+            {"name": name, "count": count}
+            for name, count in cofactor_counts.most_common()
+        ],
     }
 
 
@@ -136,5 +146,6 @@ def enrich_results(query_output: dict) -> dict:
             "ph":          group_stats["ph"],
             "km_mM":       group_stats["km_mM"],
             "kcat_per_s":  group_stats["kcat_per_s"],
+            "cofactors":   group_stats["cofactors"],
         }
     }

@@ -2,7 +2,7 @@ import json
 import re
 import numpy as np
 
-with open("brenda_2026_1.json") as f:
+with open("files/brenda_2026_1.json") as f:
     brenda = json.load(f)
 
 

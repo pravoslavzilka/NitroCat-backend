@@ -2,6 +2,7 @@ import os
 import requests
 from tqdm import tqdm
 import zipfile
+import tarfile 
 
 import os
 import sys
@@ -32,7 +33,7 @@ logger.info("=== Ready ===")
 FILES = {
     "files/clipzyme_model.ckpt": "https://zenodo.org/records/15161343/files/clipzyme_model.zip?download=1",
     "files/clipzyme_screening_set.p": "https://zenodo.org/records/15161343/files/clipzyme_data.zip?download=1",
-    "brenda_2026_1.json":"https://zenodo.org/records/19475027/files/brenda_2026_1.json.tar.gz?download=1",
+    "files/brenda_2026_1.json":"https://zenodo.org/records/19475027/files/brenda_2026_1.json.tar.gz?download=1",
 }
 
 
@@ -57,7 +58,7 @@ def download_if_missing(path: str, url: str):
     if is_targz:
         print("Extracting .tar.gz...")
         with tarfile.open(archive_path, "r:gz") as t:
-            t.extractall("/")
+            t.extractall("files/")
         os.remove(archive_path)
 
     elif is_zip:
@@ -132,7 +133,7 @@ def health():
 @app.get("/health/brenda")
 def health_brenda():
     """Check whether brenda_2026_1.json is present, readable and valid."""
-    path = "brenda_2026_1.json"
+    path = "files/brenda_2026_1.json"
 
     # Check file exists
     if not os.path.exists(path):
