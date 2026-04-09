@@ -116,7 +116,7 @@ RUN pip install \
 RUN pip install clipzyme==0.0.12
 
 # Copy app code
-COPY main.py query.py uniprot.py ./
+COPY main.py query.py uniprot.py enrich.py brenda.py enzyme_finder.py ./
 
 RUN mkdir -p files
 
