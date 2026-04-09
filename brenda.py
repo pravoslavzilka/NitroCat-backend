@@ -355,31 +355,29 @@ def get_optimal_conditions(ec: str, uniprot_id: str) -> dict:
 def get_enzyme_properties(ec: str, uniprot_id: str) -> dict:
     data = summarize(ec, uniprot_id)
 
-    def normalize_to_value(entries: list, possible_keys: list[str]) -> list[dict]:
-        """Rename whichever key exists to 'value' for uniform processing."""
-        result = []
-        for e in entries:
-            for key in possible_keys:
-                if key in e:
-                    result.append({"value": e[key], "comment": e.get("comment", "")})
-                    break
-        return result
-
-    def q1_values(entries: list) -> float | None:
+    def q1_values(entries: list, val_key: str) -> float | None:
         values = []
         for e in entries:
             try:
-                values.append(float(e["value"]))
+                values.append(float(e[val_key]))
             except (ValueError, TypeError):
                 continue
         if not values:
             return None
         return float(np.percentile(values, 25))
 
-    def median_values(entries: list) -> float | None:
+    def median_values(entries: list, *val_keys: str) -> float | None:
+        """Accept multiple possible key names for the value field."""
         values = []
         for e in entries:
-            raw = str(e["value"])
+            # Try each key until one works
+            raw = None
+            for key in val_keys:
+                if key in e:
+                    raw = str(e[key])
+                    break
+            if raw is None:
+                continue
             if "-" in raw:
                 parts = raw.split("-")
                 try:
@@ -395,28 +393,59 @@ def get_enzyme_properties(ec: str, uniprot_id: str) -> dict:
             return None
         return float(np.median(values))
 
-    # Normalize all temp/pH entries to use "value" key
-    all_temp = normalize_to_value(data["temperature_optimum"],   ["value_celsius"]) + \
-               normalize_to_value(data["temperature_range"],     ["range_celsius"]) + \
-               normalize_to_value(data["temperature_stability"], ["value_celsius"])
+    # Combine all temp / pH sources
+    all_temp = (
+        data["temperature_optimum"] +
+        data["temperature_range"] +
+        data["temperature_stability"]
+    )
+    all_ph = (
+        data["ph_optimum"] +
+        data["ph_range"] +
+        data["ph_stability"]
+    )
 
-    all_ph   = normalize_to_value(data["ph_optimum"],   ["value"]) + \
-               normalize_to_value(data["ph_range"],     ["range"]) + \
-               normalize_to_value(data["ph_stability"], ["value"])
 
-    all_km   = normalize_to_value(data["km_value"],        ["value_mM"])
-    all_kcat = normalize_to_value(data["turnover_number"], ["value_per_s"])
+
+    # ── Cofactors ─────────────────────────────────────────────────
+    ec_entry   = brenda["data"].get(ec, {})
+    protein_id = data["protein_id"]
+
+    cofactors = []
+    for entry in ec_entry.get("cofactor", []):
+        proteins = entry.get("proteins", [])
+        # protein-specific first, fall back to all entries for this organism
+        if protein_id in proteins or not proteins:
+            name = entry.get("value", "").strip()
+            if name:
+                cofactors.append({
+                    "name":    name,
+                    "comment": entry.get("comment", ""),
+                })
+
+    # Deduplicate by name, keep first comment
+    seen = {}
+    for c in cofactors:
+        if c["name"] not in seen:
+            seen[c["name"]] = c
+    cofactors_deduped = list(seen.values())
 
     result = {
         "ec":                 ec,
         "uniprot":            uniprot_id,
         "organism":           data["organism"],
         "enzyme_name":        data["enzyme_name"],
-        "km_q1_mM":           q1_values(all_km),
-        "kcat_q1_per_s":      q1_values(all_kcat),
-        "temperature_median": median_values(all_temp),
-        "ph_median":          median_values(all_ph),
+        "km_q1_mM":           q1_values(data["km_value"],        "value_mM"),
+        "kcat_q1_per_s":      q1_values(data["turnover_number"], "value_per_s"),
+        "temperature_median": median_values(all_temp, "value_celsius"),
+        "ph_median":          median_values(all_ph,   "value"),
+        "cofactors":          cofactors_deduped,
+        "cofactor_names":     [c["name"] for c in cofactors_deduped],
     }
+
+        # Pass both possible key names for each field
+    result["temperature_median"] = median_values(all_temp, "value_celsius", "range_celsius")
+    result["ph_median"]           = median_values(all_ph,  "value", "range")
 
     print(f"\n{'='*50}")
     print(f"Enzyme     : {result['enzyme_name']} (EC {ec})")
@@ -427,6 +456,7 @@ def get_enzyme_properties(ec: str, uniprot_id: str) -> dict:
     print(f"Kcat Q1    : {result['kcat_q1_per_s']:.3f} 1/s"    if result['kcat_q1_per_s']       is not None else "Kcat Q1    : no data")
     print(f"Temp median: {result['temperature_median']:.1f} °C" if result['temperature_median']  is not None else "Temp median: no data")
     print(f"pH   median: {result['ph_median']:.2f}"             if result['ph_median']           is not None else "pH   median: no data")
+    print(f"Cofactors  : {', '.join(result['cofactor_names']) or 'no data'}")
 
     return result
 

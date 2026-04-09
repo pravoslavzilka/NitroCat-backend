@@ -198,6 +198,7 @@ def _fetch_brenda_json(ec: str, uniprot_id: str) -> dict:
             "brenda_temperature_median": props.get("temperature_median"),
             "brenda_ph_median":          props.get("ph_median"),
             "brenda_enzyme_name":        props.get("enzyme_name"),
+            "cofactors":                 props.get("cofactor_names", []),
         }
     except ValueError as e:
         # Protein not found in BRENDA JSON — not an error, just missing data

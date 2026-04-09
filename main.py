@@ -32,6 +32,7 @@ logger.info("=== Ready ===")
 FILES = {
     "files/clipzyme_model.ckpt": "https://zenodo.org/records/15161343/files/clipzyme_model.zip?download=1",
     "files/clipzyme_screening_set.p": "https://zenodo.org/records/15161343/files/clipzyme_data.zip?download=1",
+    "brenda_2026_1.json":"https://zenodo.org/records/19475027/files/brenda_2026_1.json.tar.gz?download=1",
 }
 
 
@@ -40,21 +41,34 @@ def download_if_missing(path: str, url: str):
     if os.path.exists(path):
         return
     os.makedirs("files", exist_ok=True)
-    zip_path = path + ".zip"
-    
+
+    # Determine archive type from URL
+    is_targz = ".tar.gz" in url or ".tgz" in url
+    is_zip   = ".zip" in url
+
+    archive_path = path + (".tar.gz" if is_targz else ".zip")
+
     print(f"Downloading {url}...")
     resp = requests.get(url, stream=True)
-    with open(zip_path, "wb") as f:
+    with open(archive_path, "wb") as f:
         for chunk in resp.iter_content(chunk_size=1024 * 1024):
             f.write(chunk)
-    
-    # Unzip if it is a zip file
-    if url.endswith(".zip?download=1") or url.endswith(".zip"):
-        print("Unzipping...")
-        with zipfile.ZipFile(zip_path, "r") as z:
+
+    if is_targz:
+        print("Extracting .tar.gz...")
+        with tarfile.open(archive_path, "r:gz") as t:
+            t.extractall("/")
+        os.remove(archive_path)
+
+    elif is_zip:
+        print("Extracting .zip...")
+        with zipfile.ZipFile(archive_path, "r") as z:
             z.extractall("files/")
-        os.remove(zip_path)
-    
+        os.remove(archive_path)
+
+    else:
+        print(f"Unknown archive format for {url}, skipping extraction")
+
     print(f"Done: {path}")
 
 # Download before loading model
@@ -113,6 +127,51 @@ class ScreenRequest(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/health/brenda")
+def health_brenda():
+    """Check whether brenda_2026_1.json is present, readable and valid."""
+    path = "brenda_2026_1.json"
+
+    # Check file exists
+    if not os.path.exists(path):
+        raise HTTPException(status_code=503, detail="brenda_2026_1.json not found — not downloaded yet")
+
+    # Check file size (should be at least 50MB)
+    size_mb = os.path.getsize(path) / (1024 * 1024)
+    if size_mb < 50:
+        raise HTTPException(
+            status_code=503,
+            detail=f"brenda_2026_1.json looks incomplete — only {size_mb:.1f} MB (expected >50 MB)"
+        )
+
+    # Check it is valid JSON and has expected structure
+    try:
+        import json
+        with open(path) as f:
+            data = json.load(f)
+
+        if "data" not in data:
+            raise HTTPException(status_code=503, detail="brenda_2026_1.json missing 'data' key — file may be corrupt")
+
+        ec_count      = len(data["data"])
+        sample_ec     = next(iter(data["data"]))  # first EC number
+        protein_count = sum(len(e.get("protein", {})) for e in data["data"].values())
+
+        return {
+            "status":        "ok",
+            "size_mb":       round(size_mb, 1),
+            "ec_numbers":    ec_count,
+            "proteins":      protein_count,
+            "sample_ec":     sample_ec,
+            "release":       data.get("release", "unknown"),
+        }
+
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=503, detail=f"brenda_2026_1.json is not valid JSON: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"brenda_2026_1.json check failed: {e}")
 
 
 @app.post("/screen")
