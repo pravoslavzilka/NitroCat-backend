@@ -416,7 +416,9 @@ def get_enzyme_properties(ec: str, uniprot_id: str) -> dict:
         proteins = entry.get("proteins", [])
         # protein-specific first, fall back to all entries for this organism
         if protein_id in proteins or not proteins:
-            name = entry.get("value", "").strip()
+            # Strip trailing {comment} from value, e.g. "NAD+ {cofactor}" → "NAD+"
+            raw_name = entry.get("value", "")
+            name = re.sub(r'\s*\{[^}]*\}', '', raw_name).strip()
             if name:
                 cofactors.append({
                     "name":    name,
@@ -429,6 +431,7 @@ def get_enzyme_properties(ec: str, uniprot_id: str) -> dict:
         if c["name"] not in seen:
             seen[c["name"]] = c
     cofactors_deduped = list(seen.values())
+    print(cofactors_deduped)
 
     result = {
         "ec":                 ec,

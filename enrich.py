@@ -15,33 +15,55 @@ def _extract_float(value) -> float | None:
 
 def _unify_enzyme(raw_result: dict) -> dict:
 
-    temp = (
-        raw_result.get("brenda_temperature_median")
-        or raw_result.get("temp_optimum")
-        or raw_result.get("optimal_temp")
-    )
-    if isinstance(temp, list):
-        temp = temp[0].get("value") if temp else None
+    def resolve(value):
+        """
+        Reduce any value to a scalar:
+        - None          → None
+        - float/int/str → as-is (let _extract_float handle strings)
+        - list of dicts → first dict's 'value' key
+        - list of scalars → first element
+        """
+        if value is None:
+            return None
+        if isinstance(value, (int, float, str)):
+            return value
+        if isinstance(value, list):
+            if not value:
+                return None
+            first = value[0]
+            if isinstance(first, dict):
+                return first.get("value")
+            return first
+        return value
 
-    ph = (
-        raw_result.get("brenda_ph_median")
-        or raw_result.get("ph_optimum")
-        or raw_result.get("optimal_ph")
-    )
-    if isinstance(ph, list):
-        ph = ph[0].get("value") if ph else None
+    def first_not_none(*values):
+        """Return first value that is not None, regardless of truthiness."""
+        for v in values:
+            if v is not None:
+                return v
+        return None
 
-    km = raw_result.get("brenda_km_q1_mM")
-    if km is None:
-        km_list = raw_result.get("km")
-        if isinstance(km_list, list) and km_list:
-            km = km_list[0].get("value")
+    temp = resolve(first_not_none(
+        raw_result.get("brenda_temperature_median"),
+        raw_result.get("temp_optimum"),
+        raw_result.get("optimal_temp"),
+    ))
 
-    kcat = raw_result.get("brenda_kcat_q1_per_s")
-    if kcat is None:
-        kcat_list = raw_result.get("kcat")
-        if isinstance(kcat_list, list) and kcat_list:
-            kcat = kcat_list[0].get("value")
+    ph = resolve(first_not_none(
+        raw_result.get("brenda_ph_median"),
+        raw_result.get("ph_optimum"),
+        raw_result.get("optimal_ph"),
+    ))
+
+    km = resolve(first_not_none(
+        raw_result.get("brenda_km_q1_mM"),
+        raw_result.get("km"),
+    ))
+
+    kcat = resolve(first_not_none(
+        raw_result.get("brenda_kcat_q1_per_s"),
+        raw_result.get("kcat"),
+    ))
 
     return {
         "uniprot":         raw_result.get("uniprot_id") or raw_result.get("uniprot"),
@@ -117,9 +139,11 @@ def enrich_results(query_output: dict) -> dict:
         raw = _fetch_uniprot(enzyme["uniprot"])
         result.update(_parse_uniprot(enzyme["uniprot"], raw))
 
-        # SABIO-RK
+        # SABIO-RK — only fill fields that are still None (never overwrite UniProt data)
         sabio = _fetch_sabiork(enzyme["uniprot"])
-        result.update(sabio)
+        for key, val in sabio.items():
+            if val is not None and not result.get(key):
+                result[key] = val
 
         # BRENDA JSON
         ec = result.get("ec_number")
