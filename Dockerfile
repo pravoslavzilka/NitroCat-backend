@@ -110,7 +110,8 @@ RUN pip install \
     xxhash==3.6.0 \
     yarl==1.23.0 \
     zeep==4.3.2 \
-    zstd==1.5.7.3
+    zstd==1.5.7.3 \
+    drfp==0.3.7
 
 # CLIPZyme last — depends on everything above
 RUN pip install clipzyme==0.0.12
