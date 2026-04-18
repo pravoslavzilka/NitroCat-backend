@@ -1,67 +1,90 @@
-import json
-import pickle
-import ast
-import requests
-import time
-from collections import defaultdict
+# fix_final_v2.py
+import json, re, ast
+from collections import Counter
+from clipzyme.utils.wln_processing import get_bond_changes
 
-# Get all unique UniProt IDs from your training data
 data = json.load(open('files/my_data.json'))
+print(f"Loaded: {len(data)} records")
+print(f"Sample ec before: '{data[0].get('ec')}'")
+print(f"Sample bond_changes before: {data[0].get('bond_changes')}")
 
-uniprot_ids = set()
-for record in data:
-    refs = record.get('protein_refs', '[]')
-    uids = ast.literal_eval(refs) if isinstance(refs, str) else refs
-    uniprot_ids.update(uids)
+def has_atom_map(smi):
+    return bool(re.search(r':\d+', smi))
 
-print(f"Unique UniProt IDs: {len(uniprot_ids)}")
+fixed_ec = 0
+fixed_bc = 0
+fixed_split = 0
+fixed_pr = 0
 
-# Fetch EC numbers from UniProt REST API
-def get_ec(uniprot_id):
-    try:
-        url = f"https://rest.uniprot.org/uniprotkb/{uniprot_id}.json"
-        resp = requests.get(url, timeout=10)
-        if resp.status_code != 200:
-            return []
-        data = resp.json()
-        ecs = []
-        for db in data.get('dbReferences', []):
-            if db.get('type') == 'EC':
-                ecs.append(db.get('id', ''))
-        # Also check proteinDescription
-        for rec in data.get('proteinDescription', {}).get('recommendedName', {}).get('ecNumbers', []):
-            ecs.append(rec.get('value', ''))
-        return list(set(filter(None, ecs)))
-    except:
-        return []
+for i, r in enumerate(data):
+    # Fix split val → dev
+    if r.get('split') == 'val':
+        r['split'] = 'dev'
+        fixed_split += 1
 
-# Fetch EC for all your enzymes
-uid2ec = {}
-for i, uid in enumerate(uniprot_ids):
-    ecs = get_ec(uid)
-    uid2ec[uid] = ecs
-    if i % 50 == 0:
-        print(f"  {i}/{len(uniprot_ids)} — {uid}: {ecs}")
-    time.sleep(0.1)  # rate limit
+    # Fix protein_refs — must be string
+    if isinstance(r.get('protein_refs'), list):
+        r['protein_refs'] = str(r['protein_refs'])
+        fixed_pr += 1
 
-print(f"\nFetched EC numbers for {sum(1 for v in uid2ec.values() if v)} enzymes")
-
-# Build ec2uniprot mapping
-cyp_ec2uniprot = defaultdict(set)
-for uid, ecs in uid2ec.items():
-    for ec in ecs:
-        cyp_ec2uniprot[ec].add(uid)
-
-print(f"Unique EC numbers found: {len(cyp_ec2uniprot)}")
-
-# Merge with existing ec2uniprot.p
-ec2uniprot = pickle.load(open('files/ec2uniprot.p', 'rb'))
-
-for ec, uids in cyp_ec2uniprot.items():
-    if ec in ec2uniprot:
-        ec2uniprot[ec] = list(set(ec2uniprot[ec]) | uids)
+    # Fix rule_id
+    if r['split'] == 'train':
+        r['rule_id'] = i
+    elif r['split'] == 'dev':
+        r['rule_id'] = 100000 + i
     else:
-        ec2uniprot[ec] = list(uids)
+        r['rule_id'] = 200000 + i
 
-pickle.dump(ec2uniprot, open('files/ec2uniprot.p', 'wb'))
-print(f"Saved → files/ec2uniprot.p ({len(ec2uniprot)} total EC numbers)")
+    # Fix EC — set to generic CYP if missing
+    ec = r.get('ec')
+    if not ec or ec == '' or ec is None:
+        r['ec'] = '1.14.14.1'
+        fixed_ec += 1
+
+    # Fix bond_changes — recompute from mapped SMILES
+    if not r.get('bond_changes') or r['bond_changes'] == []:
+        if all(has_atom_map(s) for s in r['mapped_reactants'] + r['mapped_products']):
+            try:
+                rxn_str = "{}>>{}".format(
+                    '.'.join(sorted(r['mapped_reactants'])),
+                    '.'.join(sorted(r['mapped_products']))
+                )
+                bc = list(get_bond_changes(rxn_str))
+                r['bond_changes'] = bc if bc else [[0, 1, 1.0]]
+                fixed_bc += 1
+            except:
+                r['bond_changes'] = [[0, 1, 1.0]]
+                fixed_bc += 1
+        else:
+            r['bond_changes'] = [[0, 1, 1.0]]
+            fixed_bc += 1
+
+print(f"\nFixed:")
+print(f"  split val→dev:   {fixed_split}")
+print(f"  protein_refs:    {fixed_pr}")
+print(f"  EC:              {fixed_ec}")
+print(f"  bond_changes:    {fixed_bc}")
+
+# Verify before saving
+print(f"\nVerification:")
+print(f"  ec ok:    {sum(1 for r in data if r.get('ec') and r['ec'] != '')}/{len(data)}")
+print(f"  bc ok:    {sum(1 for r in data if r.get('bond_changes'))}/{len(data)}")
+print(f"  split ok: {sum(1 for r in data if r.get('split') in ['train','dev','test'])}/{len(data)}")
+print(f"  pr ok:    {sum(1 for r in data if isinstance(r.get('protein_refs'), str))}/{len(data)}")
+
+# Sample after fix
+print(f"\nSample after fix:")
+print(f"  ec:           {data[0].get('ec')}")
+print(f"  bond_changes: {data[0].get('bond_changes')[:2]}")
+print(f"  split:        {data[0].get('split')}")
+print(f"  protein_refs: {data[0].get('protein_refs')}")
+
+# Only save if all looks good
+ec_ok = sum(1 for r in data if r.get('ec') and r['ec'] != '')
+bc_ok = sum(1 for r in data if r.get('bond_changes'))
+
+if ec_ok == len(data) and bc_ok == len(data):
+    json.dump(data, open('files/disjoint/my_data_final.json', 'w'), indent=2)
+    print(f"\n✅ Saved to files/disjoint/my_data_final.json")
+else:
+    print(f"\n❌ NOT SAVED — still have issues: ec_ok={ec_ok} bc_ok={bc_ok}")

@@ -89,6 +89,7 @@ from typing import Optional
 
 from query import query_enzymes
 from enrich import enrich_results
+from simi_search import RheaSearcher
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
@@ -122,6 +123,24 @@ class ScreenRequest(BaseModel):
                 "enrich":           True,
             }
         }
+
+
+class ReactionRequest(BaseModel):
+    substrate_smiles: str
+    product_smiles:   str
+    top_k:            Optional[int] = 5
+    pub_fetch:           Optional[bool] = True
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "substrate_smiles": "CC(O)C",
+                "product_smiles":   "CC(=O)C",
+                "top_k":            5,
+                "pub_fetch":           True,
+            }
+        }
+
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -203,3 +222,29 @@ def screen(req: ScreenRequest):
         output = enrich_results(output)
 
     return output
+
+
+
+
+@app.post("/reaction")
+def simi_find(req: ReactionRequest):
+    """
+    Find enzymes likely to catalyse the given reaction.
+
+    Returns
+    -------
+    {
+        "status":   "success" | "error",
+        "result":   [ enzyme dicts ] | "error description",
+        "comments": [ "note 1", ... ]
+    }
+    """
+
+    searcher = RheaSearcher()
+
+    results = searcher.find(
+        smiles = req.substrate_smiles + ">>" + req.product_smiles,
+        top_k=req.top_k,
+        fetch_pubs=req.pub_fetch)
+
+    return results
