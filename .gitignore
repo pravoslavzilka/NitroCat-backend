@@ -6,3 +6,10 @@ data_update.py
 csv_to_json.py
 files/brenda_2026_1.json
 /rhea_cache
+
+# Large data artifacts (kept on disk / distributed separately, not in git)
+/data_processing/*.json
+/data_processing/*.p
+/data_processing/*.zip
+/data_processing/*.npy
+**/__pycache__/

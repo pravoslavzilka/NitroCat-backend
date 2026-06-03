@@ -30,11 +30,10 @@ import numpy as np
 from drfp import DrfpEncoder
 from rdkit import Chem
 
-BASE_DIR  = Path(__file__).parent
+BASE_DIR  = Path(__file__).resolve().parent.parent
 CACHE_DIR = BASE_DIR / "rhea_cache"
 
-sys.path.insert(0, str(BASE_DIR))
-from simi_core import (
+from .simi_core import (
     _encode_reaction, load_fingerprint_cache, load_ec_cache,
     fetch_publications_parallel, load_uniprot_cache, build_uniprot_cache,
     DRFP_FPS_CACHE, DRFP_IDS_CACHE, _cache_ready,
