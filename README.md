@@ -1,5 +1,7 @@
 # NitroCat Backend — Enzyme Screening API
 
+> **Developed at Nitroduck**, as part of the NitroCat enzyme-discovery project.
+
 A FastAPI service that, given a reaction (substrate + product SMILES), returns ranked
 enzyme candidates with kinetic and annotation data. Enzyme ranking is powered by
 [CLIPZyme](https://github.com/pgmikhael/CLIPZyme) (and the
@@ -92,3 +94,10 @@ pinned dependencies, copies the `app/` package, and runs `uvicorn app.main:app` 
 
 - **Model:** [`clipzyme_CoBaCo`](https://github.com/pravoslavzilka/clipzyme_CoBaCo) — the
   CoBaCo (Constraint Batch Construction) fork of CLIPZyme used to train the screening model.
+- **Pipeline:** [`clipzyme-claire-pipeline`](https://github.com/pravoslavzilka/clipzyme-claire-pipeline)
+  — offline CLIPZyme + CLAIRE evaluation pipeline.
+
+## License
+
+© 2026 Nitroduck. All rights reserved. Third-party components retain their own licenses
+(e.g. CLIPZyme under Apache-2.0).
