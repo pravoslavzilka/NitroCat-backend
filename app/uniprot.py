@@ -186,7 +186,7 @@ def _fetch_brenda_json(ec: str, uniprot_id: str) -> dict:
         return {"brenda_json_note": "No EC number — cannot query BRENDA JSON"}
 
     try:
-        from brenda import get_enzyme_properties
+        from .brenda import get_enzyme_properties
     except ImportError:
         return {"brenda_json_note": "brenda.py not found — place it in the same directory"}
 

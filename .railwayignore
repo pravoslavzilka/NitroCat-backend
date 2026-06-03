@@ -2,3 +2,7 @@ files/clipzyme_model.ckpt
 files/clipzyme_screening_set.p
 env
 files
+dev
+data_processing
+__pycache__
+.git

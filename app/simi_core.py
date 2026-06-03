@@ -8,7 +8,7 @@ from rdkit.Chem import AllChem
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import os
 
-BASE_DIR  = Path(__file__).parent
+BASE_DIR  = Path(__file__).resolve().parent.parent
 CACHE_DIR = BASE_DIR / "rhea_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -1,5 +1,5 @@
 import numpy as np
-from uniprot import _fetch_uniprot, _parse_uniprot, _fetch_sabiork, _fetch_brenda_json
+from .uniprot import _fetch_uniprot, _parse_uniprot, _fetch_sabiork, _fetch_brenda_json
 import re
 
 def _extract_float(value) -> float | None:

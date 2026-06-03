@@ -1,6 +1,6 @@
 import json
-from query import query_enzymes
-from uniprot import enrich_results
+from .query import query_enzymes
+from .uniprot import enrich_results
 
 output   = query_enzymes("CC(O)C", "CC(=O)C")
 enriched = enrich_results(output)

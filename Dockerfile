@@ -116,11 +116,11 @@ RUN pip install \
 # CLIPZyme last — depends on everything above
 RUN pip install clipzyme==0.0.12
 
-# Copy app code
-COPY main.py query.py uniprot.py enrich.py brenda.py enzyme_finder.py simi_core.py simi_search.py ./
+# Copy app code (FastAPI package)
+COPY app/ ./app/
 
 RUN mkdir -p files
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -77,8 +77,8 @@ for path, url in FILES.items():
     download_if_missing(path, url)
 
 # Now import the rest — model loads after files are present
-from query import query_enzymes
-from uniprot import enrich_results
+from .query import query_enzymes
+from .uniprot import enrich_results
 
 
 
@@ -87,9 +87,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 
-from query import query_enzymes
-from enrich import enrich_results
-from simi_search import RheaSearcher
+from .query import query_enzymes
+from .enrich import enrich_results
+from .simi_search import RheaSearcher
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
